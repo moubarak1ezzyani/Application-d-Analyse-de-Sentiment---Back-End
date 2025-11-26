@@ -1,170 +1,106 @@
-# import os
-# import requests
-# import jwt
-# from dotenv import load_dotenv
-# from fastapi import FastAPI, HTTPException,Header
-# from pydantic import BaseModel
-
-
-#     # _____ Integrer Hugging Face Inference API : 
-#     # --- Gestion de la cle API
-# load_dotenv()       # Gestion de cle : env
-# app = FastAPI()
-# HF_TOKEN= os.getenv("HF_TOKEN_API")
-# API_URL = os.getenv("API_URL_env")
-# JWT_SECRET = os.getenv("JWT_SECRET_env")
-
-# # L'implementation de FastAPI
-# class LoginData(BaseModel):
-#     username : str
-#     password : str
-
-# class PredictData(BaseModel):
-#     text_tx : str
-
-# # --- endpoint Login
-# @app.post("/login")
-# def login(data : LoginData):
-#     if data.username == "admin" and data.password == "1234":
-
-#         # --- Creation : Token JWT
-#         payload = {"username" : data.username}
-#         token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
-#         return {"access_token" : token, "token_type" : "Bearer"}
-#     raise HTTPException(status_code = 401, detail = "Identifiants incorrects")
-
-# # --- endpoin PREDICT (Service IA Sécurisé) ---
-# @app.post("/predict")
-# def predict(authorization: str = Header()):
-#     print("auth : ",authorization)
-    
-#     # Verification de securite (Middleware manuel)
-#     if authorization is None or not authorization.startswith("Bearer "):
-#         raise HTTPException(status_code=401, detail="Token manquant")
-    
-#     token_recu = authorization.split(" ")[1]        # On enlève le mot 'Bearer'
-    
-#     try:
-#         decoded = jwt.decode(token_recu, JWT_SECRET, algorithms=["HS256"])  # PASSED : token valide
-#     except:
-#         raise HTTPException(status_code=401, detail="Token invalide ou expiré")
-
-#     # --- APPEL AU SERVICE IA : HUGG FACE
-#     headers_hf = {"Authorization": f"Bearer {HF_TOKEN}"}
-#     payload_hf = {"inputs": data.text_tx}
-    
-#     try:
-#         response = requests.post(API_URL, headers=headers_hf, json=payload_hf)
-#         response.raise_for_status()         # Vérifie les erreurs HTTP (4xx, 5xx)
-        
-#         # On renvoie directement le résultat de l'IA
-#         return {"resultat_ia": response.json(), "user_used": decoded['admin']}
-        
-#     except Exception as e:
-#         raise HTTPException(status_code=503, detail=f"Erreur IA: {str(e)}")
-
-# def verify_token(authorization: str = Header(None)):
-#     # 1. Vérifier si le header existe et commence par Bearer
-#     if authorization is None or not authorization.startswith("Bearer "):
-#         raise HTTPException(status_code=401, detail="Token manquant ou format invalide")
-    
-#     # 2. Extraire le token
-#     token_recu = authorization.split(" ")[1]
-    
-#     # 3. Décoder et vérifier le token
-#     try:
-#         decoded = jwt.decode(token_recu, JWT_SECRET, algorithms=["HS256"])
-#         return decoded # Si tout va bien, on renvoie les infos de l'utilisateur
-#     except jwt.ExpiredSignatureError:
-#         raise HTTPException(status_code=401, detail="Token expiré")
-#     except jwt.InvalidTokenError:
-#         raise HTTPException(status_code=401, detail="Token invalide")
-
-# ----------------------------------------------------------
 import os, requests, jwt
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware # <--- 1. Import vital
 from pydantic import BaseModel
 
-load_dotenv()       # Gestion de la cle : env
+load_dotenv()
 app = FastAPI()
 
-    # _____ Integrer Hugging Face Inference API : 
-    # --- Gestion de la cle API
+# ---------------------------------------------------------
+# 1. CONFIGURATION DU CORS (Indispensable pour Next.js)
+# ---------------------------------------------------------
+origins = [
+    "http://localhost:3000", # L'adresse de votre Frontend
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"], # Autorise POST, GET, OPTIONS...
+    allow_headers=["*"], # Autorise les headers comme Authorization
+)
+
+# Variables d'environnement
 HF_TOKEN = os.getenv("HF_TOKEN")
 API_URL = os.getenv("API_URL_env")
 JWT_SECRET = os.getenv("JWT_SECRET_env")
 ALGO = os.getenv("algo_env")
 
-# Implementation
+# ---------------------------------------------------------
+# 2. MODELES DE DONNEES
+# ---------------------------------------------------------
 class User(BaseModel):
-    username : str
+    username: str
     password: str
 
 class TextInput(BaseModel):
-    text_tx: str
+    text: str  # <--- 2. Renommé de 'text_tx' à 'text' pour matcher le frontend
 
-# --- Dépendance : Le Gardien  ---
-def get_current_user(authorization: str = Header(...)):        # get_c()
-    """ if not authorization:
-        # print("Token Manquant") 
-        raise HTTPException(401, "Token manquant")
-    try:
-        # On coupe "Bearer <token>" et on décode
-        return jwt.decode(authorization.split(" ")[1], JWT_SECRET, algorithms=ALGO)
-    except:
-        raise HTTPException(401, "Token invalide ou expiré") """
-    print(authorization)
+# ---------------------------------------------------------
+# 3. ROUTES
+# ---------------------------------------------------------
 
-# --- Login ---
 @app.post("/login")
 def login(user: User):
+    # Authentification simulée (Hardcodée comme demandé)
     if user.username == "admin" and user.password == "1234":
         token = jwt.encode({"sub": user.username}, JWT_SECRET, algorithm=ALGO)
-        # Conversion bytes -> str nécessaire sur certaines versions de python
+        # Gestion compatibilité version python pour jwt
         return {"access_token": token if isinstance(token, str) else token.decode()}
-    raise HTTPException(401, "Mauvais identifiants")
+    
+    raise HTTPException(status_code=401, detail="Mauvais identifiants")
 
-# --- Prédiction (Protégée) ---
-@app.post("/predict")
-def predict(input: TextInput, token: str = Header()):
-    print(input.text_tx)
-    print(HF_TOKEN)
-    print(type(HF_TOKEN))
 
+# <--- 3. Route renommée de '/predict' à '/sentiment'
+@app.post("/sentiment") 
+def analyze_sentiment(input: TextInput, authorization: str = Header(None)):
+    
+    # --- A. Vérification du Token (Sécurité) ---
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Token manquant")
+    
     try:
-        # 🔹 Décodage du JWT
-        payload = jwt.decode(token, key=JWT_SECRET, algorithms=[ALGO])
+        # Le frontend envoie : "Bearer eyJhbGci..."
+        # On doit couper la chaîne pour ne garder que le code après "Bearer "
+        token_clean = authorization.split(" ")[1] 
+        
+        # On vérifie si le token est valide
+        payload = jwt.decode(token_clean, key=JWT_SECRET, algorithms=[ALGO])
+        user_sub = payload.get("sub")
+        
+    except Exception as e:
+        print(f"Erreur Token: {e}")
+        raise HTTPException(status_code=401, detail="Token invalide ou expiré")
 
+    # --- B. Appel à Hugging Face ---
+    try:
         response = requests.post(
             API_URL, 
             headers={"Authorization": f"Bearer {HF_TOKEN}"}, 
-            json={"inputs": input.text_tx}
+            json={"inputs": input.text} # On utilise input.text ici
         )
         response.raise_for_status()
-
-        return {
-            "sentiment": response.json(),
-            "user": payload["sub"]
-        }
+        data_hf = response.json() 
+        
+        # Hugging Face renvoie souvent une liste de listes [[{'label': 'POS', 'score': 0.9}]]
+        # On aplatit le résultat pour le frontend
+        if isinstance(data_hf, list) and len(data_hf) > 0:
+            # On prend le premier résultat (cas simple)
+            # Parfois c'est une liste imbriquée (classification de texte)
+            first_result = data_hf[0]
+            if isinstance(first_result, list):
+                first_result = first_result[0]
+                
+            return {
+                "sentiment": first_result.get('label'),
+                "score": first_result.get('score'),
+                "user": user_sub
+            }
+            
+        return data_hf # Cas de secours
 
     except Exception as e:
-        raise HTTPException(503, f"Erreur Service IA: {str(e)}")
-"""     
-@app.post("/get_token")
-async def token(input: TextInput,token :str = Header()):
-    try:
-        data = jwt.decode(token,key=JWT_SECRET,algorithms=ALGO)
-        if token :
-            response = requests.post(
-            API_URL, 
-            headers={"Authorization": f"Bearer {HF_TOKEN}"}, 
-            json={"inputs": input.text_tx}
-        )
-            response.raise_for_status()     # Vérifie si HF renvoie une erreur
-        return {"sentiment": response.json(), "user": data["sub"]}
-        
-    except:
-        raise HTTPException(402,f'token invalide') """
-
-   
+        print(f"Erreur API IA: {e}")
+        raise HTTPException(status_code=503, detail="Erreur du service IA")
